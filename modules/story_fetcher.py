@@ -154,11 +154,41 @@ def _fetch_reddit_posts(subreddit: str, sort: str = "hot") -> list[dict]:
         return []
 
 
+def _llm_call(prompt: str, max_tokens: int = 1800) -> str:
+    """Call Anthropic — falls back to OpenAI GPT-4o-mini if credits exhausted."""
+    import anthropic as _anthropic
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if anthropic_key:
+        try:
+            client = _anthropic.Anthropic(api_key=anthropic_key)
+            msg = client.messages.create(
+                model=_CLAUDE_MODEL,
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return msg.content[0].text.strip()
+        except _anthropic.BadRequestError as e:
+            if "credit balance" in str(e).lower():
+                import logging
+                logging.getLogger("redditbot-en").warning("[llm] Anthropic credits exhausted — OpenAI fallback")
+            else:
+                raise
+    import openai
+    oai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not oai_key:
+        raise RuntimeError("Neither Anthropic nor OpenAI API key available")
+    oai = openai.OpenAI(api_key=oai_key)
+    resp = oai.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return resp.choices[0].message.content.strip()
+
+
 def _adapt_for_tiktok_en(title: str, text: str, subreddit: str) -> dict:
     """Prepares the story for TikTok — complete story, English.
     For long posts (>500 words) returns part1 + part2 for a two-video split."""
-    import anthropic
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     _is_long = len(text.split()) > 500
 
@@ -216,12 +246,7 @@ Reply ONLY with this JSON format (no markdown, no other text):
   "description": "FOMO-inducing caption (1-2 sentences)"
 }}"""
 
-    response = client.messages.create(
-        model=_CLAUDE_MODEL,
-        max_tokens=1800,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw   = response.content[0].text.strip()
+    raw   = _llm_call(prompt, max_tokens=1800)
     match = re.search(r'\{[\s\S]*\}', raw)
     raw   = match.group(0) if match else raw
     try:
