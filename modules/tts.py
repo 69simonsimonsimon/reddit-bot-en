@@ -1,0 +1,128 @@
+import asyncio
+import os
+import re
+
+import edge_tts
+import requests as _requests
+
+# ElevenLabs: Adam — deep, authoritative storytelling voice
+_EL_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
+_EL_MODEL    = "eleven_multilingual_v2"
+
+# English Edge TTS voices: mix for variety
+_EN_VOICES = [
+    "en-US-ChristopherNeural",   # male, American
+    "en-US-JennyNeural",         # female, American
+    "en-GB-RyanNeural",          # male, British
+    "en-GB-SoniaNeural",         # female, British
+    "en-AU-WilliamNeural",       # male, Australian
+]
+
+OPENAI_VOICE = "onyx"
+OPENAI_MODEL = "tts-1"
+
+
+def _tts_openai(text: str, audio_path: str, api_key: str) -> list[dict]:
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+
+    response = client.audio.speech.create(
+        model=OPENAI_MODEL,
+        voice=OPENAI_VOICE,
+        input=text,
+    )
+    with open(audio_path, "wb") as f:
+        f.write(response.content)
+
+    with open(audio_path, "rb") as f:
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=f,
+            response_format="verbose_json",
+            timestamp_granularities=["word"],
+        )
+
+    word_timings = []
+    for w in (transcript.words or []):
+        word_timings.append({"word": w.word.strip(), "start": w.start, "end": w.end})
+    return word_timings
+
+
+async def _tts_edge_async(text: str, audio_path: str, voice_name: str) -> list[dict]:
+    communicate  = edge_tts.Communicate(text, voice_name, boundary="WordBoundary")
+    word_timings = []
+    with open(audio_path, "wb") as f:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                f.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                start = chunk["offset"] / 1e7
+                dur   = chunk["duration"] / 1e7
+                word_timings.append({"word": chunk["text"], "start": start, "end": start + dur})
+    return word_timings
+
+
+def _tts_elevenlabs(text: str, audio_path: str, api_key: str) -> list[dict]:
+    url  = f"https://api.elevenlabs.io/v1/text-to-speech/{_EL_VOICE_ID}"
+    resp = _requests.post(
+        url,
+        headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+        json={
+            "text":     text,
+            "model_id": _EL_MODEL,
+            "voice_settings": {"stability": 0.45, "similarity_boost": 0.80, "style": 0.30, "use_speaker_boost": True},
+        },
+        timeout=120,
+    )
+    resp.raise_for_status()
+    with open(audio_path, "wb") as f:
+        f.write(resp.content)
+    from openai import OpenAI
+    wc = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    with open(audio_path, "rb") as f:
+        tr = wc.audio.transcriptions.create(model="whisper-1", file=f, response_format="verbose_json", timestamp_granularities=["word"])
+    return [{"word": w.word.strip(), "start": w.start, "end": w.end} for w in (tr.words or [])]
+
+
+def text_to_speech(text: str, output_path: str, topic: str = "") -> tuple[str, list[dict]]:
+    """
+    ElevenLabs (primary) → OpenAI TTS → Edge TTS fallback.
+    """
+    el_key     = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+
+    if el_key and openai_key:
+        try:
+            print(f"   ElevenLabs TTS [{_EL_VOICE_ID}] ...")
+            timings = _tts_elevenlabs(text, output_path, el_key)
+            return output_path, timings
+        except Exception as e:
+            print(f"   ElevenLabs error: {e} — falling back to OpenAI")
+
+    if openai_key:
+        try:
+            print(f"   OpenAI TTS [{OPENAI_VOICE}] ...")
+            timings = _tts_openai(text, output_path, openai_key)
+            return output_path, timings
+        except Exception as e:
+            print(f"   OpenAI TTS error: {e} — falling back to Edge TTS")
+
+    import random
+    voice_name = random.choice(_EN_VOICES)
+    print(f"   Edge TTS: {voice_name}")
+    timings = asyncio.run(_tts_edge_async(text, output_path, voice_name))
+    return output_path, timings
+
+
+def get_sentence_timings(text: str, word_timings: list[dict]) -> list[tuple]:
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    if not word_timings:
+        return [(s, i * 3.0, (i + 1) * 3.0) for i, s in enumerate(sentences)]
+    result, word_idx = [], 0
+    for sentence in sentences:
+        n  = len(re.findall(r'\w+', sentence))
+        si = min(word_idx, len(word_timings) - 1)
+        ei = min(word_idx + n - 1, len(word_timings) - 1)
+        result.append((sentence, max(0, word_timings[si]["start"] - 0.1), word_timings[ei]["end"] + 0.2))
+        word_idx += n
+    return result
