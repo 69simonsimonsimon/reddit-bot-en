@@ -26,9 +26,23 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
+          pip install yt-dlp --upgrade
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
+
+      - name: Restore background cache
+        id: cache-bg
+        uses: actions/cache@v4
+        with:
+          path: assets/backgrounds
+          key: reddit-en-backgrounds-v1
+
+      - name: Prefetch backgrounds (if cache miss)
+        if: steps.cache-bg.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p assets/backgrounds
+          python3 modules/prefetch_backgrounds.py --count 8 || echo "Background prefetch failed — using gradient fallback"
 
       - name: Generate and queue video
         env:
