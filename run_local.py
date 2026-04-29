@@ -40,7 +40,7 @@ def generate_and_queue(subreddit: str = None) -> bool:
     from tts import text_to_speech
     from video_creator import create_video
 
-    stamp      = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp      = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
     audio_path = OUTPUT_DIR / f"audio_{stamp}.mp3"
     video_path = OUTPUT_DIR / f"video_{stamp}.mp4"
 
@@ -122,14 +122,25 @@ def generate_and_queue(subreddit: str = None) -> bool:
 
 
 if __name__ == "__main__":
+    import concurrent.futures
     subreddit = sys.argv[1] if len(sys.argv) > 1 else None
     count     = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    workers   = min(count, int(sys.argv[3]) if len(sys.argv) > 3 else 3)
 
-    success = 0
-    for i in range(count):
+    done = []
+
+    def _task(i):
         if count > 1:
-            logger.info(f"\n{'='*50}\nGenerating video {i+1}/{count}\n{'='*50}")
+            logger.info(f"\n{'='*50}\nVideo {i+1}/{count}\n{'='*50}")
         if generate_and_queue(subreddit):
-            success += 1
+            done.append(1)
 
-    logger.info(f"\n🏁  Done: {success}/{count} videos queued on Bunny")
+    if workers > 1 and count > 1:
+        logger.info(f"🚀  Parallel: {count} videos × {workers} workers")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(_task, range(count)))
+    else:
+        for i in range(count):
+            _task(i)
+
+    logger.info(f"\n🏁  Done: {len(done)}/{count} videos queued on Bunny")
