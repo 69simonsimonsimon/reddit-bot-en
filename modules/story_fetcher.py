@@ -28,6 +28,8 @@ def _extract_json_fields(text: str) -> dict:
     return {
         "title":       extract("title"),
         "story":       extract("story"),
+        "part1":       extract("part1"),
+        "part2":       extract("part2"),
         "description": extract("description"),
     }
 
