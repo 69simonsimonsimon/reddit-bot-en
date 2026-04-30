@@ -189,10 +189,15 @@ def _solid_bg(duration: float):
     return ImageClip(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)).with_duration(duration)
 
 
-def _make_background(video_path: str | None, duration: float, zoom: bool = False):
+def _make_background(video_path: str | None, duration: float):
     if video_path:
         try:
-            clip  = VideoFileClip(video_path)
+            clip = VideoFileClip(video_path)
+            # Strip audio — background must never contribute sound
+            try:
+                clip = clip.without_audio()
+            except Exception:
+                pass
             ratio = WIDTH / HEIGHT
             if clip.w / clip.h > ratio:
                 nw   = int(clip.h * ratio)
@@ -202,19 +207,9 @@ def _make_background(video_path: str | None, duration: float, zoom: bool = False
                 clip = clip.cropped(y1=(clip.h - nh) // 2, y2=(clip.h + nh) // 2)
             clip = clip.resized((WIDTH, HEIGHT))
             if clip.duration < duration:
-                clip = concatenate_videoclips([clip] * (int(duration / clip.duration) + 2))
+                loops = int(duration / clip.duration) + 2
+                clip  = concatenate_videoclips([clip] * loops)
             clip = clip.subclipped(0, duration)
-            if zoom:
-                def _zoom_frame(get_frame, t):
-                    frame = get_frame(t)
-                    scale = 1.0 + 0.05 * (t / max(duration, 1))
-                    new_h = int(HEIGHT * scale)
-                    new_w = int(WIDTH  * scale)
-                    img   = Image.fromarray(frame).resize((new_w, new_h), Image.BILINEAR)
-                    off_x = (new_w - WIDTH)  // 2
-                    off_y = (new_h - HEIGHT) // 2
-                    return np.array(img)[off_y:off_y + HEIGHT, off_x:off_x + WIDTH]
-                clip = clip.transform(_zoom_frame)
             overlay = ColorClip((WIDTH, HEIGHT), color=(0, 0, 0)).with_opacity(0.62).with_duration(duration)
             return CompositeVideoClip([clip, overlay])
         except Exception as e:
@@ -226,7 +221,7 @@ def _make_multi_background(video_paths: list[str], duration: float):
     if not video_paths:
         return _solid_bg(duration)
     seg_dur  = duration / len(video_paths)
-    segments = [_make_background(p, seg_dur, zoom=True) for p in video_paths]
+    segments = [_make_background(p, seg_dur) for p in video_paths]
     return concatenate_videoclips(segments)
 
 
