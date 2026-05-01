@@ -53,6 +53,7 @@ def generate_and_queue(subreddit: str = None) -> bool:
     from story_fetcher import fetch_story, SUBREDDITS
     from tts import text_to_speech
     from video_creator import create_video
+    from quality_check import quality_check
 
     stamp      = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
     audio_path = OUTPUT_DIR / f"audio_{stamp}.mp3"
@@ -63,6 +64,19 @@ def generate_and_queue(subreddit: str = None) -> bool:
         logger.info("📖  Fetching Reddit story...")
         story_data = fetch_story(subreddit_override=subreddit)
         logger.info(f"    → r/{story_data['subreddit']}: {story_data['title'][:60]}")
+
+        # 1b. AI Quality Check
+        logger.info("🤖  AI quality check...")
+        approved, reason = quality_check(
+            title=story_data["title"],
+            content=story_data["story"],
+            context=f"r/{story_data['subreddit']}",
+            lang="en",
+        )
+        logger.info(f"    → {reason}")
+        if not approved:
+            logger.info("    ❌  Rejected — skipping this video")
+            return False
 
         # 2. TTS + Word Timings
         logger.info("🎙️   Generating voiceover (OpenAI)...")

@@ -142,7 +142,7 @@ def _fetch_pexels_videos(subreddit: str, api_key: str, count: int = 3) -> list[s
         downloaded = []
 
         for video in videos:
-            if len(downloaded) + len(cached) >= count + 2:
+            if len(downloaded) + len(cached) >= count + 3:
                 break
             idx        = len(cached) + len(downloaded) + 1
             cache_file = CACHE_DIR / f"{slug}_{idx:02d}.mp4"
@@ -469,7 +469,7 @@ def create_video(
     video_paths = []
     if pexels_key:
         print(f"   Fetching Pexels BG for r/{subreddit}...")
-        video_paths = _fetch_pexels_videos(subreddit, pexels_key, count=3)
+        video_paths = _fetch_pexels_videos(subreddit, pexels_key, count=4)
         if video_paths:
             print(f"   → {len(video_paths)} BG video(s) loaded")
         else:
