@@ -80,7 +80,16 @@ def generate_and_queue(subreddit: str = None) -> bool:
 
         # 2. TTS + Word Timings
         logger.info("🎙️   Generating voiceover (OpenAI)...")
-        tts_text = f"{story_data['title']}. {story_data['story']}"
+        _ctas = [
+            "Follow for more stories like this every day!",
+            "Drop a follow so you never miss a story!",
+            "Follow us for daily stories that will blow your mind!",
+            "If this got you, follow — new stories every single day!",
+            "Follow for more insane stories posted daily!",
+            "Hit follow — we post the best Reddit stories every day!",
+        ]
+        cta = random.choice(_ctas)
+        tts_text = f"{story_data['title']}. {story_data['story']} {cta}"
         words = tts_text.split()
         if len(words) > 155:
             tts_text = " ".join(words[:155])
