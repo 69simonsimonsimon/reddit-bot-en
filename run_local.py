@@ -78,7 +78,7 @@ def generate_and_queue(subreddit: str = None) -> bool:
             logger.info("    ❌  Rejected — skipping this video")
             return False
 
-        # 2. TTS + Word Timings
+        # 2. TTS + Word Timings  (target: 45-55s = ~110-130 words)
         logger.info("🎙️   Generating voiceover (OpenAI)...")
         _ctas = [
             "Follow for more stories like this every day!",
@@ -91,8 +91,10 @@ def generate_and_queue(subreddit: str = None) -> bool:
         cta = random.choice(_ctas)
         tts_text = f"{story_data['title']}. {story_data['story']} {cta}"
         words = tts_text.split()
-        if len(words) > 155:
-            tts_text = " ".join(words[:155])
+        # Sweet spot: 110-130 words → ~47-55 seconds at average TTS speed
+        MAX_WORDS = 130
+        if len(words) > MAX_WORDS:
+            tts_text = " ".join(words[:MAX_WORDS])
             for end_char in [". ", "! ", "? "]:
                 idx = tts_text.rfind(end_char)
                 if idx > 50:
@@ -118,9 +120,18 @@ def generate_and_queue(subreddit: str = None) -> bool:
         mb = video_path.stat().st_size / 1024 / 1024
         logger.info(f"    → {video_path.name} ({mb:.1f} MB)")
 
-        # 4. Caption
+        # 4. Caption — emoji hook + title + question + hashtags
+        from video_creator import SUBREDDIT_QUESTIONS, DEFAULT_QUESTION
+        question     = SUBREDDIT_QUESTIONS.get(story_data["subreddit"], DEFAULT_QUESTION)
+        _emojis      = {"drama": "😤", "funny": "😂", "sad": "💔", "suspense": "👀"}
+        from video_creator import SUBREDDIT_MOOD
+        mood_emoji   = _emojis.get(SUBREDDIT_MOOD.get(story_data["subreddit"], ""), "👀")
         description  = story_data.get("description", story_data["title"])
-        full_caption = description + "\n" + " ".join(story_data["hashtags"])
+        full_caption = (
+            f"{mood_emoji} {description}\n\n"
+            f"{question}\n\n"
+            + " ".join(story_data["hashtags"])
+        )
 
         # 5. Upload to Bunny queue
         logger.info("☁️   Uploading to Bunny queue...")
