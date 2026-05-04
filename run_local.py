@@ -133,8 +133,8 @@ def generate_and_queue(subreddit: str = None) -> bool:
         cta = random.choice(_ctas)
         tts_text = f"{story_data['title']}. {story_data['story']} {cta}"
         words = tts_text.split()
-        # Sweet spot: 110-130 words → ~47-55 seconds at average TTS speed
-        MAX_WORDS = 130
+        # TikTok monetization: 165 words → ~65-70 seconds at average TTS speed
+        MAX_WORDS = 165
         if len(words) > MAX_WORDS:
             tts_text = " ".join(words[:MAX_WORDS])
             for end_char in [". ", "! ", "? "]:
