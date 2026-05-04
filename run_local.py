@@ -117,18 +117,19 @@ def generate_and_queue(subreddit: str = None) -> bool:
         logger.info("🎙️   Generating voiceover (OpenAI)...")
         if is_part2_format:
             _ctas = [
-                "Part 2 drops tomorrow — follow so you don't miss it!",
-                "Follow for Part 2 — dropping tomorrow!",
-                "Hit follow — Part 2 coming tomorrow!",
+                "Follow for Part 2 tomorrow! What do you think happens? 👇",
+                "Stitch this with your reaction! Part 2 drops tomorrow 🔔",
+                "Comment your prediction — Part 2 coming tomorrow!",
+                "What would you have done? Part 2 drops tomorrow 👇",
             ]
         else:
             _ctas = [
-                "Follow for more stories like this every day!",
-                "Drop a follow so you never miss a story!",
-                "Follow us for daily stories that will blow your mind!",
-                "If this got you, follow — new stories every single day!",
-                "Follow for more insane stories posted daily!",
-                "Hit follow — we post the best Reddit stories every day!",
+                "What would you have done in this situation? Comment below! 👇",
+                "Stitch this with your reaction — I want to hear your take!",
+                "Comment: who's in the wrong here? 👇",
+                "What do you think about this? Drop a comment! 🔥",
+                "Send this to someone who needs to see it 👀 Comment your opinion!",
+                "Would you have done the same? Let me know! 👇",
             ]
         cta = random.choice(_ctas)
         tts_text = f"{story_data['title']}. {story_data['story']} {cta}"
@@ -172,7 +173,7 @@ def generate_and_queue(subreddit: str = None) -> bool:
         # Part-2 cliffhanger marker in caption
         part2_line = "\n🔔 Part 2 dropping tomorrow — follow now!" if is_part2_format else ""
         # Stitch/duet bait in 35% of videos
-        stitch_line = "\n🎭 Stitch this with your reaction 👇" if random.random() < 0.35 else ""
+        stitch_line = "\n🎭 Stitch this with your reaction 👇" if random.random() < 0.5 else ""
         # Daily-rotating trending hashtags
         trending = _daily_trending(3)
 
