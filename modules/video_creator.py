@@ -192,6 +192,16 @@ def _is_valid_video(path: Path) -> bool:
         return False
 
 
+def _trim_bg_cache(max_files: int = 25):
+    """Keep only the newest max_files background videos — deletes oldest first."""
+    try:
+        files = sorted(CACHE_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in files[max_files:]:
+            old.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def _fetch_pexels_videos(subreddit: str, api_key: str, count: int = 3) -> list[str]:
     """Fetch Pexels videos matching the subreddit topic. Returns list of local paths."""
     queries = SUBREDDIT_QUERIES.get(subreddit, DEFAULT_QUERIES)
@@ -623,6 +633,7 @@ def create_video(
             print(f"   → {len(video_paths)} BG video(s) loaded")
         else:
             print("   → No Pexels BG found, using black")
+        _trim_bg_cache(max_files=25)  # keep cache lean
 
     background = _make_multi_background(video_paths, total_dur)
     clips      = [background]

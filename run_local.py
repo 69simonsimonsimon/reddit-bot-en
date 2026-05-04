@@ -17,7 +17,7 @@ import os
 import random
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -31,6 +31,22 @@ logger = logging.getLogger("redditbot-en")
 
 OUTPUT_DIR = ROOT / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+# ── Trending hashtag rotation (daily seed keeps them fresh) ──────────────────
+_TRENDING_POOL = [
+    "#redditreadings", "#redditreads", "#redtok", "#asmrstory", "#storytok",
+    "#mustwatch", "#unbelievable", "#crazy", "#shocking", "#mindblown",
+    "#viralstory", "#stitch", "#duet", "#fypage", "#fypシ",
+    "#drama2025", "#storydrama", "#relationshipdrama", "#redditdrama2025",
+    "#viralreddit", "#redditstorytime", "#tiktokstory", "#storytelling",
+]
+
+def _daily_trending(n: int = 3) -> list[str]:
+    """Returns n hashtags from trending pool, rotated by day."""
+    seeded = _TRENDING_POOL.copy()
+    rng = random.Random(date.today().toordinal())
+    rng.shuffle(seeded)
+    return seeded[:n]
 
 
 def _cleanup_stale_files():
@@ -78,16 +94,42 @@ def generate_and_queue(subreddit: str = None) -> bool:
             logger.info("    ❌  Rejected — skipping this video")
             return False
 
+        # Get mood early — needed for voice selection + caption
+        from video_creator import SUBREDDIT_MOOD
+        mood = SUBREDDIT_MOOD.get(story_data["subreddit"], "")
+
+        # Part-2 cliffhanger: use pre-split part1 (long stories) or force-split (30% chance)
+        is_part2_format = False
+        if story_data.get("part2"):
+            # story_fetcher already split this into cliffhanger + resolution
+            is_part2_format = True
+            logger.info("    → Part 2 format (long story split)")
+        elif random.random() < 0.30:
+            # Short story: artificially cut at ~70% for cliffhanger
+            words_all = story_data["story"].split()
+            cut_idx   = max(30, int(len(words_all) * 0.70))
+            story_data["part2"] = " ".join(words_all[cut_idx:])
+            story_data["story"] = " ".join(words_all[:cut_idx]) + "..."
+            is_part2_format = True
+            logger.info("    → Part 2 format (artificial cliffhanger)")
+
         # 2. TTS + Word Timings  (target: 45-55s = ~110-130 words)
         logger.info("🎙️   Generating voiceover (OpenAI)...")
-        _ctas = [
-            "Follow for more stories like this every day!",
-            "Drop a follow so you never miss a story!",
-            "Follow us for daily stories that will blow your mind!",
-            "If this got you, follow — new stories every single day!",
-            "Follow for more insane stories posted daily!",
-            "Hit follow — we post the best Reddit stories every day!",
-        ]
+        if is_part2_format:
+            _ctas = [
+                "Part 2 drops tomorrow — follow so you don't miss it!",
+                "Follow for Part 2 — dropping tomorrow!",
+                "Hit follow — Part 2 coming tomorrow!",
+            ]
+        else:
+            _ctas = [
+                "Follow for more stories like this every day!",
+                "Drop a follow so you never miss a story!",
+                "Follow us for daily stories that will blow your mind!",
+                "If this got you, follow — new stories every single day!",
+                "Follow for more insane stories posted daily!",
+                "Hit follow — we post the best Reddit stories every day!",
+            ]
         cta = random.choice(_ctas)
         tts_text = f"{story_data['title']}. {story_data['story']} {cta}"
         words = tts_text.split()
@@ -101,8 +143,8 @@ def generate_and_queue(subreddit: str = None) -> bool:
                     tts_text = tts_text[:idx + 1]
                     break
 
-        _, word_timings = text_to_speech(tts_text, str(audio_path))
-        logger.info(f"    → {len(word_timings)} words")
+        _, word_timings = text_to_speech(tts_text, str(audio_path), mood=mood)
+        logger.info(f"    → {len(word_timings)} words  [voice: {mood or 'default'}]")
 
         # 3. Render video
         logger.info("🎞️   Rendering video...")
@@ -124,13 +166,20 @@ def generate_and_queue(subreddit: str = None) -> bool:
         from video_creator import SUBREDDIT_QUESTIONS, DEFAULT_QUESTION
         question     = SUBREDDIT_QUESTIONS.get(story_data["subreddit"], DEFAULT_QUESTION)
         _emojis      = {"drama": "😤", "funny": "😂", "sad": "💔", "suspense": "👀"}
-        from video_creator import SUBREDDIT_MOOD
-        mood_emoji   = _emojis.get(SUBREDDIT_MOOD.get(story_data["subreddit"], ""), "👀")
+        mood_emoji   = _emojis.get(mood, "👀")
         description  = story_data.get("description", story_data["title"])
+
+        # Part-2 cliffhanger marker in caption
+        part2_line = "\n🔔 Part 2 dropping tomorrow — follow now!" if is_part2_format else ""
+        # Stitch/duet bait in 35% of videos
+        stitch_line = "\n🎭 Stitch this with your reaction 👇" if random.random() < 0.35 else ""
+        # Daily-rotating trending hashtags
+        trending = _daily_trending(3)
+
         full_caption = (
             f"{mood_emoji} {description}\n\n"
-            f"{question}\n\n"
-            + " ".join(story_data["hashtags"])
+            f"{question}{part2_line}{stitch_line}\n\n"
+            + " ".join(story_data["hashtags"] + trending)
         )
 
         # 5. Upload to Bunny queue
@@ -167,6 +216,70 @@ def generate_and_queue(subreddit: str = None) -> bool:
         video_path.unlink(missing_ok=True)  # uploaded — delete local copy
         logger.info(f"✅  Queued: {filename}")
         logger.info(f"    Title: {story_data['title'][:60]}")
+
+        # 6. Generate + upload Part 2 if available
+        if is_part2_format and story_data.get("part2"):
+            logger.info("🎞️   Generating Part 2...")
+            stamp2   = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
+            audio2   = OUTPUT_DIR / f"audio2_{stamp2}.mp3"
+            video2   = OUTPUT_DIR / f"video2_{stamp2}.mp4"
+            try:
+                p2_cta    = random.choice([
+                    "Follow for more stories every day!",
+                    "Drop a follow — new stories daily!",
+                    "Follow us for more insane Reddit stories!",
+                ])
+                tts2_text = f"Part 2. {story_data['title']}. {story_data['part2']} {p2_cta}"
+                words2    = tts2_text.split()
+                if len(words2) > MAX_WORDS:
+                    tts2_text = " ".join(words2[:MAX_WORDS])
+                    for ec in [". ", "! ", "? "]:
+                        idx = tts2_text.rfind(ec)
+                        if idx > 50:
+                            tts2_text = tts2_text[:idx + 1]
+                            break
+                _, wt2 = text_to_speech(tts2_text, str(audio2), mood=mood)
+                create_video(
+                    subreddit=story_data["subreddit"],
+                    title=f"{story_data['title']} (Part 2)",
+                    story=story_data["part2"],
+                    audio_path=str(audio2),
+                    output_path=str(video2),
+                    word_timings=wt2,
+                    gradient_index=random.randint(0, 4),
+                )
+                audio2.unlink(missing_ok=True)
+                caption2 = (
+                    f"{mood_emoji} {description} — Part 2 👀\n\n"
+                    f"{question}\n\n"
+                    + " ".join(story_data["hashtags"] + trending)
+                )
+                fn2 = f"reddit_en_{stamp2}.mp4"
+                with open(str(video2), "rb") as f2:
+                    requests.put(
+                        f"https://{hostname}/{zone}/queue/{fn2}",
+                        headers={"AccessKey": password, "Content-Type": "video/mp4"},
+                        data=f2, verify=certifi.where(), timeout=300,
+                    ).raise_for_status()
+                requests.put(
+                    f"https://{hostname}/{zone}/queue/{fn2.replace('.mp4', '.json')}",
+                    headers={"AccessKey": password, "Content-Type": "application/json"},
+                    data=json.dumps({
+                        "title":     f"{story_data['title']} (Part 2)",
+                        "caption":   caption2,
+                        "subreddit": story_data["subreddit"],
+                        "cdn_url":   f"{cdn_url}/queue/{fn2}",
+                    }, ensure_ascii=False).encode(),
+                    verify=certifi.where(), timeout=30,
+                ).raise_for_status()
+                video2.unlink(missing_ok=True)
+                logger.info(f"✅  Part 2 Queued: {fn2}")
+            except Exception as e:
+                logger.error(f"❌  Part 2 failed: {e}", exc_info=True)
+            finally:
+                audio2.unlink(missing_ok=True)
+                video2.unlink(missing_ok=True)
+
         return True
 
     finally:

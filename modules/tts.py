@@ -21,15 +21,25 @@ _EN_VOICES = [
 OPENAI_VOICE = "onyx"
 OPENAI_MODEL = "tts-1"
 
+# Mood → (voice, speed) — different voice + tempo per story type for variety
+_MOOD_VOICE: dict[str, tuple[str, float]] = {
+    "drama":    ("onyx",    0.92),   # deep, serious, slightly slower
+    "funny":    ("shimmer", 1.08),   # light, playful, slightly faster
+    "sad":      ("nova",    0.88),   # soft, empathetic, slower
+    "suspense": ("fable",   0.95),   # mysterious storyteller, slightly slower
+}
 
-def _tts_openai(text: str, audio_path: str, api_key: str) -> list[dict]:
+
+def _tts_openai(text: str, audio_path: str, api_key: str,
+                voice: str = OPENAI_VOICE, speed: float = 1.0) -> list[dict]:
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
 
     response = client.audio.speech.create(
         model=OPENAI_MODEL,
-        voice=OPENAI_VOICE,
+        voice=voice,
         input=text,
+        speed=speed,
     )
     with open(audio_path, "wb") as f:
         f.write(response.content)
@@ -84,17 +94,20 @@ def _tts_elevenlabs(text: str, audio_path: str, api_key: str) -> list[dict]:
     return [{"word": w.word.strip(), "start": w.start, "end": w.end} for w in (tr.words or [])]
 
 
-def text_to_speech(text: str, output_path: str, topic: str = "") -> tuple[str, list[dict]]:
+def text_to_speech(text: str, output_path: str, topic: str = "",
+                   mood: str = "") -> tuple[str, list[dict]]:
     """
-    ElevenLabs (primary) → OpenAI TTS → Edge TTS fallback.
+    OpenAI TTS (mood-adapted voice+speed) → Edge TTS fallback.
+    mood: 'drama' | 'funny' | 'sad' | 'suspense' | ''
     """
     el_key     = os.environ.get("ELEVENLABS_API_KEY", "").strip()
     openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
 
     if openai_key:
+        voice, speed = _MOOD_VOICE.get(mood, (OPENAI_VOICE, 1.0))
         try:
-            print(f"   OpenAI TTS [{OPENAI_VOICE}] ...")
-            timings = _tts_openai(text, output_path, openai_key)
+            print(f"   OpenAI TTS [{voice} @ {speed}x] ...")
+            timings = _tts_openai(text, output_path, openai_key, voice=voice, speed=speed)
             return output_path, timings
         except Exception as e:
             print(f"   OpenAI TTS error: {e} — falling back to Edge TTS")
