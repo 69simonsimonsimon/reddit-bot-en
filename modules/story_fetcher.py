@@ -40,7 +40,8 @@ _log = logging.getLogger("story_fetcher")
 
 _generation_lock = threading.Lock()
 
-_CLAUDE_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+_CLAUDE_MODEL    = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-5")
+_CLAUDE_QA_MODEL = "claude-sonnet-4-5"
 
 SUBREDDITS = [
     # ─── AITA / Judgment (Gen Z favorite) ────────────────────────────────────
@@ -199,6 +200,53 @@ def _llm_call(prompt: str, max_tokens: int = 1800) -> str:
     return resp.choices[0].message.content.strip()
 
 
+def _llm_call_review(prompt: str, max_tokens: int = 200) -> str:
+    """Fast Sonnet review — cheap, only checks hook quality."""
+    import anthropic as _anthropic
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not anthropic_key:
+        return '{"score": 8, "passes": true, "feedback": ""}'
+    try:
+        client = _anthropic.Anthropic(api_key=anthropic_key)
+        msg = client.messages.create(
+            model=_CLAUDE_QA_MODEL,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text.strip()
+    except Exception:
+        return '{"score": 8, "passes": true, "feedback": ""}'
+
+
+def _qa_review_story(title: str, story: str) -> tuple[bool, str]:
+    """
+    Sonnet scores the Opus-adapted story script.
+    Returns (passes_qa, feedback) — passes if score >= 7.
+    """
+    prompt = f"""Rate this TikTok Reddit story script from 1–10:
+
+Title: {title}
+Script (first 300 chars): {story[:300]}
+
+Criteria:
+1. Hook strength: Does the FIRST sentence open with the most shocking/emotional moment?
+2. Engagement: Would 16–25 year olds watch this to the end?
+3. Title quality: Is it emotional and curiosity-inducing?
+
+Reply ONLY with JSON: {{"score": 7, "passes": true, "feedback": "One sentence of feedback"}}
+Passes if score >= 7."""
+
+    raw = _llm_call_review(prompt, max_tokens=150)
+    try:
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            result = json.loads(match.group(0))
+            return bool(result.get("passes", True)), result.get("feedback", "")
+    except Exception:
+        pass
+    return True, ""
+
+
 def _adapt_for_tiktok_en(title: str, text: str, subreddit: str) -> dict:
     """Prepares the story for TikTok — complete story, English.
     For long posts (>500 words) returns part1 + part2 for a two-video split."""
@@ -302,6 +350,34 @@ Reply ONLY with this JSON format (no markdown, no other text):
             last_end = max(data["story"].rfind(". "), data["story"].rfind("! "), data["story"].rfind("? "))
             if last_end > 50:
                 data["story"] = data["story"][:last_end + 1]
+
+    # QA review: Sonnet checks hook + engagement quality
+    qa_passes, qa_feedback = _qa_review_story(data.get("title", ""), data.get("story", ""))
+    if not qa_passes:
+        _log.info(f"QA review failed: {qa_feedback} — refining hook with Opus…")
+        refine_prompt = f"""Improve the title and first sentence of this Reddit TikTok story.
+
+QA feedback: {qa_feedback}
+
+Current title: {data.get('title', '')}
+Current first sentence: {data.get('story', '')[:200]}
+
+Reply ONLY with JSON: {{"title": "improved title", "first_sentence": "improved first sentence"}}"""
+        try:
+            raw2 = _llm_call(refine_prompt, max_tokens=300)
+            match2 = re.search(r'\{.*\}', raw2, re.DOTALL)
+            if match2:
+                refined = json.loads(match2.group(0))
+                if refined.get("title"):
+                    data["title"] = refined["title"]
+                if refined.get("first_sentence") and data.get("story"):
+                    sentences = data["story"].split(". ", 1)
+                    data["story"] = refined["first_sentence"] + (". " + sentences[1] if len(sentences) > 1 else "")
+            _log.info("Hook refined.")
+        except Exception as e:
+            _log.warning(f"Hook refinement failed: {e}")
+    else:
+        _log.info("QA review passed.")
 
     return data
 

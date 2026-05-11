@@ -14,7 +14,7 @@ _EN_VOICES = [
 ]
 
 OPENAI_VOICE = "onyx"
-OPENAI_MODEL = "tts-1"
+OPENAI_MODEL = "tts-1-hd"
 
 # Mood → (voice, speed) — different voice + tempo per story type for variety
 _MOOD_VOICE: dict[str, tuple[str, float]] = {
