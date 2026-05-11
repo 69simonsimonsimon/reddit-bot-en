@@ -41,6 +41,17 @@ jobs:
           mkdir -p assets/backgrounds
           python3 modules/prefetch_backgrounds.py --count 8 || echo "Background prefetch failed — using gradient fallback"
 
+      - name: Restore used posts history (avoid repeats)
+        uses: actions/cache@v4
+        with:
+          path: output/used_posts.json
+          key: used-posts-en-${{ github.run_number }}
+          restore-keys: |
+            used-posts-en-
+
+      - name: Ensure output directory exists
+        run: mkdir -p output
+
       - name: Generate and queue video
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
