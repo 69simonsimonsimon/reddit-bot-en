@@ -5,6 +5,9 @@ on:
     - cron: '30 7,11,16,20 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write   # Allow git push of history file
+
 jobs:
   generate:
     runs-on: ubuntu-latest
@@ -41,14 +44,6 @@ jobs:
           mkdir -p assets/backgrounds
           python3 modules/prefetch_backgrounds.py --count 8 || echo "Background prefetch failed — using gradient fallback"
 
-      - name: Restore used posts history (avoid repeats)
-        uses: actions/cache@v4
-        with:
-          path: output/used_posts.json
-          key: used-posts-en-${{ github.run_number }}
-          restore-keys: |
-            used-posts-en-
-
       - name: Ensure output directory exists
         run: mkdir -p output
 
@@ -69,3 +64,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: python3 run_local.py 2
+
+      - name: Commit updated post history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/used_posts.json
+          git diff --staged --quiet && echo "No history changes" || git commit -m "chore: update used posts [skip ci]"
+          git push || echo "Nothing to push"
