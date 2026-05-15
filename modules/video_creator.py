@@ -164,13 +164,28 @@ def _is_valid_video(path: Path) -> bool:
 def _get_minecraft_backgrounds(count: int = 3) -> list[str]:
     """
     Returns randomly selected Minecraft parkour videos from the local cache.
-    Videos are downloaded via prefetch_backgrounds.py (yt-dlp).
+    If cache is empty, automatically runs prefetch_backgrounds.py to download videos.
     Fallback: empty list → black background.
     """
     all_videos = [p for p in CACHE_DIR.glob("*.mp4") if _is_valid_video(p)]
+
     if not all_videos:
-        print("   No Minecraft BG in cache — using black background")
+        print("   No Minecraft BG in cache — auto-downloading...")
+        try:
+            import subprocess
+            prefetch = Path(__file__).parent / "prefetch_backgrounds.py"
+            subprocess.run(
+                ["python3", str(prefetch), "--count", "15"],
+                timeout=300, check=False,
+            )
+            all_videos = [p for p in CACHE_DIR.glob("*.mp4") if _is_valid_video(p)]
+        except Exception as e:
+            print(f"   Auto-download failed: {e}")
+
+    if not all_videos:
+        print("   No Minecraft BG available — using black background")
         return []
+
     random.shuffle(all_videos)
     chosen = all_videos[:count]
     print(f"   Minecraft BG: {[p.name for p in chosen]}")
@@ -490,7 +505,7 @@ def _mix_background_music(speech: AudioFileClip, duration: float, mood: str = ""
         music = AudioFileClip(str(track_path))
         music = music.with_effects([afx.AudioLoop(duration=duration)])
         music = music.with_effects([
-            afx.MultiplyVolume(0.10),
+            afx.MultiplyVolume(0.05),
             afx.AudioFadeIn(1.0),
             afx.AudioFadeOut(1.5),
         ])
