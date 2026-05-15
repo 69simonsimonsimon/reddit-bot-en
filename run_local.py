@@ -157,6 +157,7 @@ def generate_and_queue(subreddit: str = None) -> bool:
             output_path=str(video_path),
             word_timings=word_timings,
             gradient_index=random.randint(0, 4),
+            visual_query=story_data.get("visual_query", ""),
         )
         audio_path.unlink(missing_ok=True)  # free space early
 
@@ -248,6 +249,7 @@ def generate_and_queue(subreddit: str = None) -> bool:
                     output_path=str(video2),
                     word_timings=wt2,
                     gradient_index=random.randint(0, 4),
+                    visual_query=story_data.get("visual_query", ""),
                 )
                 audio2.unlink(missing_ok=True)
                 caption2 = (

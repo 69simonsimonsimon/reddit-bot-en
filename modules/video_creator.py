@@ -202,10 +202,14 @@ def _trim_bg_cache(max_files: int = 25):
         pass
 
 
-def _fetch_pexels_videos(subreddit: str, api_key: str, count: int = 3) -> list[str]:
-    """Fetch Pexels videos matching the subreddit topic. Returns list of local paths."""
-    queries = SUBREDDIT_QUERIES.get(subreddit, DEFAULT_QUERIES)
-    query   = random.choice(queries)
+def _fetch_pexels_videos(subreddit: str, api_key: str, count: int = 3,
+                         visual_query: str = "") -> list[str]:
+    """Fetch Pexels videos matching the story. Prefers visual_query over subreddit mapping."""
+    if visual_query and visual_query.strip():
+        query = visual_query.strip()
+    else:
+        queries = SUBREDDIT_QUERIES.get(subreddit, DEFAULT_QUERIES)
+        query   = random.choice(queries)
     slug    = f"reddit_{query.replace(' ', '_')}"
 
     # Check cache first
@@ -614,21 +618,26 @@ def create_video(
     output_path: str,
     word_timings: list[dict] | None = None,
     gradient_index: int = 0,
+    visual_query: str = "",
 ) -> str:
     audio     = AudioFileClip(audio_path)
     total_dur = audio.duration + 0.5
 
     # Derive hook, comment question and mood from subreddit
-    hook_text       = random.choice(SUBREDDIT_HOOKS.get(subreddit, DEFAULT_HOOKS))
+    hook_text        = random.choice(SUBREDDIT_HOOKS.get(subreddit, DEFAULT_HOOKS))
     comment_question = SUBREDDIT_QUESTIONS.get(subreddit, DEFAULT_QUESTION)
     mood             = SUBREDDIT_MOOD.get(subreddit, "")
 
-    # Fetch topic-relevant Pexels videos
+    # Fetch story-specific Pexels videos (visual_query preferred over subreddit mapping)
     pexels_key  = os.environ.get("PEXELS_API_KEY", "").strip()
     video_paths = []
     if pexels_key:
-        print(f"   Fetching Pexels BG for r/{subreddit}...")
-        video_paths = _fetch_pexels_videos(subreddit, pexels_key, count=4)
+        label = f'"{visual_query}"' if visual_query else f"r/{subreddit}"
+        print(f"   Fetching Pexels BG for {label}...")
+        video_paths = _fetch_pexels_videos(subreddit, pexels_key, count=4, visual_query=visual_query)
+        if not video_paths and visual_query:
+            print(f"   → visual_query yielded nothing, falling back to r/{subreddit} mapping")
+            video_paths = _fetch_pexels_videos(subreddit, pexels_key, count=4)
         if video_paths:
             print(f"   → {len(video_paths)} BG video(s) loaded")
         else:
