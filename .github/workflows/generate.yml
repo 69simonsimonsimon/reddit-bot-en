@@ -36,13 +36,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: assets/backgrounds
-          key: reddit-en-backgrounds-v1
+          key: reddit-en-backgrounds-v2
 
       - name: Prefetch backgrounds (if cache miss)
         if: steps.cache-bg.outputs.cache-hit != 'true'
         run: |
           mkdir -p assets/backgrounds
-          python3 modules/prefetch_backgrounds.py --count 8 || echo "Background prefetch failed — using gradient fallback"
+          python3 modules/prefetch_backgrounds.py --count 15 || echo "Background prefetch failed — using gradient fallback"
 
       - name: Ensure output directory exists
         run: mkdir -p output
