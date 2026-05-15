@@ -3,7 +3,6 @@ import random
 from pathlib import Path
 
 import numpy as np
-import requests
 from moviepy import (
     AudioFileClip,
     ColorClip,
@@ -56,36 +55,6 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 MUSIC_DIR = Path(__file__).parent.parent / "assets" / "music"
 MUSIC_DIR.mkdir(parents=True, exist_ok=True)
-
-# ── Subreddit → Pexels query mapping ─────────────────────────────────────────
-
-SUBREDDIT_QUERIES: dict[str, list[str]] = {
-    "AmItheAsshole":         ["people arguing", "couple conflict", "family tension"],
-    "AITAH":                 ["people arguing", "couple conflict", "family tension"],
-    "AmIOverreacting":       ["emotional person", "relationship stress", "couple talking"],
-    "tifu":                  ["accident fail", "awkward moment", "surprised reaction"],
-    "mildlyinfuriating":     ["frustrated person", "annoying situation", "stress daily life"],
-    "facepalm":              ["facepalm cringe", "disbelief reaction", "awkward fail"],
-    "Unexpected":            ["surprise shock", "unexpected moment", "plot twist"],
-    "relationship_advice":   ["couple romantic", "love relationship", "people talking"],
-    "breakups":              ["heartbreak sad", "lonely person", "rain window sadness"],
-    "confessions":           ["person alone thinking", "dark moody atmosphere", "confession emotional"],
-    "teenagers":             ["young people city", "teen lifestyle", "youth social"],
-    "college":               ["university campus", "student life", "college social"],
-    "TwoHotTakes":           ["drama reaction", "shocked expression", "two people debate"],
-    "pettyrevenge":          ["satisfying revenge", "karma justice", "victory moment"],
-    "maliciouscompliance":   ["smart loophole", "office work", "subtle revenge"],
-    "ProRevenge":            ["revenge success", "justice served", "victory celebration"],
-    "entitledparents":       ["angry person", "entitled behavior", "parent child conflict"],
-    "entitledpeople":        ["angry person", "entitled behavior", "rude customer"],
-    "ChoosingBeggars":       ["negotiation disagreement", "money exchange", "entitled person"],
-    "offmychest":            ["person crying emotional", "confession dark room", "vulnerable moment"],
-    "TrueOffMyChest":        ["person crying emotional", "confession dark room", "vulnerable moment"],
-    "raisedbynarcissists":   ["toxic family", "emotional abuse", "person escaping"],
-    "BestofRedditorUpdates": ["satisfying resolution", "happy ending", "justice karma"],
-}
-
-DEFAULT_QUERIES = ["city life people", "urban lifestyle", "everyday moments"]
 
 # ── Subreddit → Hook text (first 2.5s overlay) ────────────────────────────────
 
@@ -192,97 +161,20 @@ def _is_valid_video(path: Path) -> bool:
         return False
 
 
-def _trim_bg_cache(max_files: int = 25):
-    """Keep only the newest max_files background videos — deletes oldest first."""
-    try:
-        files = sorted(CACHE_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for old in files[max_files:]:
-            old.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-
-def _fetch_pexels_videos(subreddit: str, api_key: str, count: int = 3,
-                         visual_query: str = "") -> list[str]:
-    """Fetch Pexels videos matching the story. Prefers visual_query over subreddit mapping."""
-    if visual_query and visual_query.strip():
-        query = visual_query.strip()
-    else:
-        queries = SUBREDDIT_QUERIES.get(subreddit, DEFAULT_QUERIES)
-        query   = random.choice(queries)
-    slug    = f"reddit_{query.replace(' ', '_')}"
-
-    # Check cache first
-    cached = [p for p in sorted(CACHE_DIR.glob(f"{slug}_*.mp4")) if _is_valid_video(p)]
-    if len(cached) >= count:
-        random.shuffle(cached)
-        return [str(p) for p in cached[:count]]
-
-    try:
-        import certifi
-        headers = {"Authorization": api_key}
-        verify  = certifi.where()
-
-        r = requests.get(
-            "https://api.pexels.com/videos/search",
-            headers=headers,
-            params={"query": query, "per_page": 15, "orientation": "portrait"},
-            timeout=15, verify=verify,
-        )
-        videos = r.json().get("videos", [])
-        if not videos:
-            # Fallback: no orientation filter
-            r = requests.get(
-                "https://api.pexels.com/videos/search",
-                headers=headers,
-                params={"query": query, "per_page": 15},
-                timeout=15, verify=verify,
-            )
-            videos = r.json().get("videos", [])
-
-        random.shuffle(videos)
-        downloaded = []
-
-        for video in videos:
-            if len(downloaded) + len(cached) >= count + 3:
-                break
-            idx        = len(cached) + len(downloaded) + 1
-            cache_file = CACHE_DIR / f"{slug}_{idx:02d}.mp4"
-            if cache_file.exists():
-                continue
-
-            files = sorted(video["video_files"], key=lambda f: f.get("width", 0), reverse=True)
-            url   = next((f["link"] for f in files if f.get("width", 0) >= 1080), None)
-            if not url:
-                url = files[0]["link"] if files else None
-            if not url:
-                continue
-
-            try:
-                dl = requests.get(
-                    url,
-                    headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.pexels.com/"},
-                    verify=verify, timeout=60, stream=True,
-                )
-                dl.raise_for_status()
-                with open(str(cache_file), "wb") as f:
-                    for chunk in dl.iter_content(1024 * 1024):
-                        f.write(chunk)
-                if _is_valid_video(cache_file):
-                    downloaded.append(cache_file)
-                    print(f"   BG downloaded: {cache_file.name}")
-                else:
-                    cache_file.unlink(missing_ok=True)
-            except Exception:
-                cache_file.unlink(missing_ok=True)
-
-        all_cached = [p for p in sorted(CACHE_DIR.glob(f"{slug}_*.mp4")) if _is_valid_video(p)]
-        random.shuffle(all_cached)
-        return [str(p) for p in all_cached[:count]]
-
-    except Exception as e:
-        print(f"   Pexels error: {e}")
+def _get_minecraft_backgrounds(count: int = 3) -> list[str]:
+    """
+    Returns randomly selected Minecraft parkour videos from the local cache.
+    Videos are downloaded via prefetch_backgrounds.py (yt-dlp).
+    Fallback: empty list → black background.
+    """
+    all_videos = [p for p in CACHE_DIR.glob("*.mp4") if _is_valid_video(p)]
+    if not all_videos:
+        print("   No Minecraft BG in cache — using black background")
         return []
+    random.shuffle(all_videos)
+    chosen = all_videos[:count]
+    print(f"   Minecraft BG: {[p.name for p in chosen]}")
+    return [str(p) for p in chosen]
 
 
 # ── Background ────────────────────────────────────────────────────────────────
@@ -628,21 +520,8 @@ def create_video(
     comment_question = SUBREDDIT_QUESTIONS.get(subreddit, DEFAULT_QUESTION)
     mood             = SUBREDDIT_MOOD.get(subreddit, "")
 
-    # Fetch story-specific Pexels videos (visual_query preferred over subreddit mapping)
-    pexels_key  = os.environ.get("PEXELS_API_KEY", "").strip()
-    video_paths = []
-    if pexels_key:
-        label = f'"{visual_query}"' if visual_query else f"r/{subreddit}"
-        print(f"   Fetching Pexels BG for {label}...")
-        video_paths = _fetch_pexels_videos(subreddit, pexels_key, count=4, visual_query=visual_query)
-        if not video_paths and visual_query:
-            print(f"   → visual_query yielded nothing, falling back to r/{subreddit} mapping")
-            video_paths = _fetch_pexels_videos(subreddit, pexels_key, count=4)
-        if video_paths:
-            print(f"   → {len(video_paths)} BG video(s) loaded")
-        else:
-            print("   → No Pexels BG found, using black")
-        _trim_bg_cache(max_files=25)  # keep cache lean
+    # Minecraft parkour background videos from local cache
+    video_paths = _get_minecraft_backgrounds(count=4)
 
     background = _make_multi_background(video_paths, total_dur)
     clips      = [background]
